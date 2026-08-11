@@ -490,28 +490,67 @@ class VideoFromFile(VideoInput):
                     bit_depth = source_bit_depth
                 return self._save_transcoded(container, path, format=format, codec=codec, metadata=metadata, bit_depth=bit_depth, crf=crf)
 
-            streams = container.streams
-
             open_kwargs = get_open_write_kwargs(path, container_format, format)
-            with av.open(path, **open_kwargs) as output_container:
-                # Add metadata before writing any streams
-                write_output_metadata(container, output_container, metadata)
+            if self._save_remuxed(container, path, open_kwargs, metadata):
+                return
 
-                # Add streams to the new container. Streams with no codec context cannot be used as an output template.
-                stream_map = {}
-                for stream in streams:
-                    if isinstance(stream, (av.VideoStream, av.AudioStream, SubtitleStream)):
-                        if stream.codec_context is None:
-                            logging.warning("Skipping %s stream %d with unsupported codec", stream.type, stream.index)
-                            continue
+            if video_stream is None:
+                raise ValueError(
+                    f"Cannot store the audio of '{self.__file}' in this container, and there is no video "
+                    "stream to re-encode it alongside."
+                )
+            if bit_depth is None:
+                bit_depth = source_bit_depth
+            if isinstance(path, io.BytesIO):
+                path.seek(0)
+                path.truncate()
+            return self._save_transcoded(container, path, format=format, codec=codec, metadata=metadata, bit_depth=bit_depth, crf=crf)
+
+    def _save_remuxed(
+        self,
+        container: InputContainer,
+        path: str | io.BytesIO,
+        open_kwargs: dict,
+        metadata: dict | None,
+    ) -> bool:
+        streams = container.streams
+        with av.open(path, **open_kwargs) as output_container:
+            # Add metadata before writing any streams
+            write_output_metadata(container, output_container, metadata)
+
+            # Add streams to the new container. Streams with no codec context cannot be used as an output template.
+            stream_map = {}
+            for stream in streams:
+                if isinstance(stream, (av.VideoStream, av.AudioStream, SubtitleStream)):
+                    if stream.codec_context is None:
+                        logging.warning("Skipping %s stream %d with unsupported codec", stream.type, stream.index)
+                        continue
+                    try:
                         out_stream = output_container.add_stream_from_template(template=stream, opaque=True)
-                        stream_map[stream] = out_stream
+                    except ValueError:
+                        codec_name = stream.codec_context.name
+                        format_name = output_container.format.name
+                        if isinstance(stream, SubtitleStream):
+                            logging.warning(
+                                "Dropping %s subtitle stream %d: the %s container cannot store it.",
+                                codec_name, stream.index, format_name,
+                            )
+                            continue
+                        logging.warning(
+                            "The %s container cannot store %s, so the whole file is being re-encoded to H.264/AAC. "
+                            "Any additional audio streams will be dropped; subtitles the output container "
+                            "can store are kept.",
+                            format_name, codec_name,
+                        )
+                        return False
+                    stream_map[stream] = out_stream
 
-                # Write packets to the new container
-                for packet in container.demux():
-                    if packet.stream in stream_map and packet.dts is not None:
-                        packet.stream = stream_map[packet.stream]
-                        output_container.mux(packet)
+            # Write packets to the new container
+            for packet in container.demux():
+                if packet.stream in stream_map and packet.dts is not None:
+                    packet.stream = stream_map[packet.stream]
+                    output_container.mux(packet)
+        return True
 
     def _save_transcoded(
         self,
@@ -564,7 +603,16 @@ class VideoFromFile(VideoInput):
             if duration:
                 duration_cap = math.ceil(duration * sample_rate)
 
+        # Subtitles are remuxed untouched: there is no subtitle encoder binding, so a stream the
+        # output container cannot store as-is is dropped with a warning naming it, exactly like
+        # the remux path does. Streams FFmpeg has no decoder for cannot template a new stream.
+        subtitle_streams = [s for s in container.streams.subtitles if s.codec_context is not None]
         streams = [video_stream] if audio_stream is None else [video_stream, audio_stream]
+        streams += subtitle_streams
+        subtitle_map = {}
+        # Subtitle packets that arrive before the first kept video frame: the output is not open
+        # yet and the pts rebase offset is not known, so they wait here rather than being lost.
+        pending_subtitles = []
         pts_step = max(1, int(round((1 / rate) / video_stream.time_base)))
         video_done = False
         audio_done = audio_stream is None
@@ -622,6 +670,32 @@ class VideoFromFile(VideoInput):
                 audio_done = True
             return cap
 
+        def mux_subtitle(packet):
+            """Remux one subtitle packet, rebased onto the trimmed timeline the video was rebased to."""
+            out_stream = subtitle_map.get(packet.stream)
+            if out_stream is None or packet.dts is None or packet.pts is None or packet.time_base is None:
+                return
+            start = float(packet.pts * packet.time_base)
+            if start < start_time or (duration and start >= start_time + duration):
+                return
+            # the video's own rebase offset, so subtitles stay in sync with it rather than
+            # with the requested start (a seek lands on the preceding keyframe)
+            offset_ticks = video_pts_offset if video_pts_offset is not None else start_pts
+            shift = int(round(float(offset_ticks * video_stream.time_base) / packet.time_base))
+            packet.pts -= shift
+            packet.dts -= shift
+            if packet.pts < 0:
+                return
+            packet.stream = out_stream
+            output.mux(packet)
+
+        def flush_subtitles():
+            # only once the first video frame fixed the rebase offset
+            if output is None or not pending_subtitles or last_video_pts is None:
+                return
+            while pending_subtitles:
+                mux_subtitle(pending_subtitles.pop(0))
+
         try:
             for packet in container.demux(*streams):
                 if video_done and audio_done:
@@ -673,6 +747,19 @@ class VideoFromFile(VideoInput):
                             out_video.codec_context.time_base = video_stream.time_base
                             if audio_stream is not None:
                                 out_audio = output.add_stream("aac", rate=sample_rate, layout=layout)
+                            for subtitle_stream in subtitle_streams:
+                                try:
+                                    subtitle_map[subtitle_stream] = output.add_stream_from_template(
+                                        template=subtitle_stream, opaque=True
+                                    )
+                                except ValueError:
+                                    logging.warning(
+                                        "Dropping %s subtitle stream %d: the %s container cannot store it, "
+                                        "and subtitles cannot be re-encoded.",
+                                        subtitle_stream.codec_context.name,
+                                        subtitle_stream.index,
+                                        output.format.name,
+                                    )
                         if (frame.width, frame.height) != source_size:
                             # encoding would silently rescale the new geometry into the old one
                             raise ValueError(
@@ -734,6 +821,7 @@ class VideoFromFile(VideoInput):
                         for out_packet in out_video.encode(frame):
                             out_packet.duration = video_frame_durations.pop(out_packet.pts, 0)
                             output.mux(out_packet)
+                        flush_subtitles()
                         drain_audio()
 
                 elif packet.stream == audio_stream and not audio_done:
@@ -769,6 +857,12 @@ class VideoFromFile(VideoInput):
                                 audio_done = True
                                 break
 
+                elif packet.stream in subtitle_map:
+                    mux_subtitle(packet)
+                elif packet.stream in subtitle_streams and output is None:
+                    pending_subtitles.append(packet)
+
+            flush_subtitles()
             if output is None:
                 raise ValueError(f"No decodable video frames found in file '{self.__file}'")
             if out_audio is not None and not audio_done:
