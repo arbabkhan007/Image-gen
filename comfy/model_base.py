@@ -253,6 +253,9 @@ class BaseModel(torch.nn.Module):
     def process_timestep(self, timestep, **kwargs):
         return timestep
 
+    def process_denoise_mask(self, denoise_masks):
+        return denoise_masks
+
     def get_dtype(self):
         return self.diffusion_model.dtype
 
@@ -2178,6 +2181,15 @@ class MiniMaxH3(BaseModel):
         payload["seed"] = kwargs.get("seed", 0)
         # same value process_latent_in/out used, so the model never undoes a scale that was not applied
         payload["audio_scale"] = self.audio_scale()
+
+        denoise_mask = kwargs.get("denoise_mask", None)
+        if denoise_mask is not None and latent_shapes is not None and len(latent_shapes) > 1:
+            masks = utils.unpack_latents(denoise_mask, latent_shapes)
+            if torch.amin(masks[0]).item() < 1.0 - 1e-3:
+                out['denoise_mask'] = comfy.conds.CONDRegular(masks[0][:1, :1].clone())
+            if torch.amin(masks[1]).item() < 1.0 - 1e-3:
+                out['audio_denoise_mask'] = comfy.conds.CONDRegular(masks[1][:1, :1].clone())
+
         if cross_attn is not None and latent_shapes is not None and len(latent_shapes) > 1:
             # packed layout built once per sampling run, h/w rounded up to the DiT's 2x2 patch
             vs = latent_shapes[0]
@@ -2187,6 +2199,48 @@ class MiniMaxH3(BaseModel):
                 refs=payload.get("refs"), frame_count=payload.get("frame_count"))
         out['minimax_payload'] = comfy.conds.CONDConstant(payload)
         return out
+
+    def process_denoise_mask(self, denoise_masks):
+        # snap the video mask to the DiT patch grid (2x2 latent pixels per patch)
+        # and the audio mask to each audio latent frame (which run at 40 audio frames per second)
+        video_mask = denoise_masks[0]
+        h, w = video_mask.shape[-2:]
+        ph, pw = self.diffusion_model.patch_size[1:]
+        lead = video_mask.shape[:-2]
+        video_mask = torch.nn.functional.pad(video_mask.reshape((-1,) + video_mask.shape[-3:]), (0, -w % pw, 0, -h % ph), mode="replicate")
+        video_mask = video_mask.reshape(lead + video_mask.shape[-2:])
+        video_mask = video_mask.reshape(video_mask.shape[:-2] + (video_mask.shape[-2] // ph, ph, video_mask.shape[-1] // pw, pw)).amax(dim=(-3, -1))
+        # quantize to 1/256 so a gradient mask yields a bounded set of row timesteps
+        video_mask = torch.round(video_mask * 256.0) / 256.0
+        # threshold values above 0.995 to 1.0 and values below 0.05 to 0.0
+        video_mask = video_mask.masked_fill(video_mask >= 0.995, 1.0).masked_fill(video_mask <= 0.05, 0.0)
+        denoise_masks[0] = video_mask.repeat_interleave(ph, dim=-2).repeat_interleave(pw, dim=-1)[..., :h, :w]
+        if len(denoise_masks) > 1:
+            audio_mask = denoise_masks[1].amax(dim=1, keepdim=True)
+            audio_mask = torch.round(audio_mask * 256.0) / 256.0
+            audio_mask = audio_mask.masked_fill(audio_mask >= 0.995, 1.0).masked_fill(audio_mask <= 0.05, 0.0)
+            denoise_masks[1] = audio_mask.expand_as(denoise_masks[1]).contiguous()
+        return denoise_masks
+
+    def scale_latent_inpaint(self, sigma, noise, latent_image, **kwargs):
+        # preserved regions run at the cond timestep, inject them at cond strength
+        shapes = self.latent_shapes
+        if shapes is None or len(shapes) < 2:
+            return super().scale_latent_inpaint(sigma=sigma, noise=noise, latent_image=latent_image, **kwargs)
+        cleans = utils.unpack_latents(latent_image, shapes)
+        noises = utils.unpack_latents(noise, shapes)
+        aug = comfy.ldm.minimax.model.VISUAL_COND_TIMESTEP # H3's video timestep is 0.999 by default
+        cleans[0] = aug * cleans[0] + (1.0 - aug) * noises[0]
+        scale = self.audio_scale()
+        if scale != 1.0:
+            # the sampler carries audio as (sigma_v / sigma_a) * x_audio and latent_image
+            # holds audio_scale * x_audio, so rescale for the model to see it clean
+            model_sampling = self.model_sampling
+            sigma_v = sigma.clamp(min=1e-6)
+            sigma_a = comfy.ldm.minimax.model.time_shift_sigma(sigma_v, model_sampling.shift, model_sampling.audio_shift)
+            factor = (sigma_v / sigma_a) / scale
+            cleans[1] = cleans[1] * factor.view(factor.shape[:1] + (1,) * (cleans[1].ndim - 1)).to(cleans[1].dtype)
+        return utils.pack_latents(cleans)[0]
 
 class TripoSplat(BaseModel):
     def __init__(self, model_config, model_type=ModelType.FLOW, device=None):
