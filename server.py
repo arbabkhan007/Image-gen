@@ -1225,19 +1225,40 @@ class PromptServer():
         self.node_replace_manager.add_routes(self.routes)
         self.app.add_subapp('/internal', self.internal_routes.get_app())
 
+        # De-duplicate routes by (method, path). Two registrations of the same
+        # path -- typically two custom nodes claiming the same endpoint --
+        # would otherwise raise inside aiohttp's router here and prevent the
+        # server from starting at all. Keep the first registration (matching
+        # aiohttp's resolution order) and log the ones that are skipped, with
+        # both handlers' modules so the conflict is diagnosable.
+        seen_routes = {}
+        deduped_routes = []
+        for route in self.routes:
+            if isinstance(route, web.RouteDef):
+                key = (route.method, route.path)
+                if key in seen_routes:
+                    logging.warning(
+                        "Skipping duplicate route %s %s registered by %s (already registered by %s)",
+                        route.method, route.path,
+                        getattr(route.handler, "__module__", "unknown"),
+                        getattr(seen_routes[key].handler, "__module__", "unknown"))
+                    continue
+                seen_routes[key] = route
+            deduped_routes.append(route)
+
         # Prefix every route with /api for easier matching for delegation.
         # This is very useful for frontend dev server, which need to forward
         # everything except serving of static files.
         # Currently both the old endpoints without prefix and new endpoints with
         # prefix are supported.
         api_routes = web.RouteTableDef()
-        for route in self.routes:
+        for route in deduped_routes:
             # Custom nodes might add extra static routes. Only process non-static
             # routes to add /api prefix.
             if isinstance(route, web.RouteDef):
                 api_routes.route(route.method, "/api" + route.path)(route.handler, **route.kwargs)
         self.app.add_routes(api_routes)
-        self.app.add_routes(self.routes)
+        self.app.add_routes(deduped_routes)
 
         # Add routes from web extensions.
         for name, dir in nodes.EXTENSION_WEB_DIRS.items():
