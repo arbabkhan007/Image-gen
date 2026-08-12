@@ -65,6 +65,9 @@ Supports all operating systems and GPU types (NVIDIA, AMD, Intel, Apple Silicon,
 ## Examples
 See what ComfyUI can do with the [newer template workflows](https://comfy.org/workflows) or old [example workflows](https://comfyanonymous.github.io/ComfyUI_examples/).
 
+## API
+`openapi.yaml` documents the newer `/api/*` endpoints, while the Python examples in `script_examples/` use the local scripting routes served by `server.py` (without the `/api` prefix). In the UI, use `File -> Export (API)` to export the current workflow before sending it to the backend.
+
 ## Features
 - A visual node graph for building and reusing image, video, audio, 3D, and text workflows without code.
 - Reusable subgraphs, workflow templates, App Mode, and a local API for integrating workflows into applications.
