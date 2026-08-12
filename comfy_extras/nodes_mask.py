@@ -262,7 +262,7 @@ class MaskComposite(IO.ComfyNode):
                 IO.Mask.Input("source"),
                 IO.Int.Input("x", default=0, min=0, max=nodes.MAX_RESOLUTION, step=1),
                 IO.Int.Input("y", default=0, min=0, max=nodes.MAX_RESOLUTION, step=1),
-                IO.Combo.Input("operation", options=["multiply", "add", "subtract", "and", "or", "xor"]),
+                IO.Combo.Input("operation", options=["multiply", "add", "subtract", "and", "or", "xor", "max", "min"], tooltip="How to combine the two masks. \"multiply\", \"add\", \"subtract\", \"max\" and \"min\" are arithmetic and preserve intermediate (feathered) mask values. \"and\", \"or\" and \"xor\" are boolean: they round each mask to 0 or 1 first, discarding any feathering. Use \"max\"/\"min\" for union/intersection of soft masks."),
             ],
             outputs=[IO.Mask.Output()],
         )
@@ -292,6 +292,10 @@ class MaskComposite(IO.ComfyNode):
             output[:, top:bottom, left:right] = torch.bitwise_or(destination_portion.round().bool(), source_portion.round().bool()).float()
         elif operation == "xor":
             output[:, top:bottom, left:right] = torch.bitwise_xor(destination_portion.round().bool(), source_portion.round().bool()).float()
+        elif operation == "max":
+            output[:, top:bottom, left:right] = torch.max(destination_portion, source_portion)
+        elif operation == "min":
+            output[:, top:bottom, left:right] = torch.min(destination_portion, source_portion)
 
         output = torch.clamp(output, 0.0, 1.0)
 
