@@ -44,6 +44,7 @@ from comfy.patcher_extension import CallbacksMP, PatcherInjection, WrappersMP
 
 import comfy_aimdo.model_vbar
 
+_WSL_MODEL_LOAD_SYNC_SKIP_LOGGED = False
 def is_model_patcher_output(output):
     return isinstance(output, ModelPatcher) or isinstance(getattr(output, "patcher", None), ModelPatcher)
 
@@ -1059,6 +1060,11 @@ class ModelPatcher:
                 mem_counter += move_weight_functions(m, device_to)
 
             load_completely.sort(reverse=True)
+            skip_wsl_load_sync = comfy.model_management.is_device_cuda(device_to) and comfy.model_management.wsl_skip_model_load_synchronize()
+            global _WSL_MODEL_LOAD_SYNC_SKIP_LOGGED
+            if skip_wsl_load_sync and len(load_completely) > 0 and not _WSL_MODEL_LOAD_SYNC_SKIP_LOGGED:
+                logging.info("Skipping per-module CUDA synchronize during model load on WSL; set COMFYUI_WSL_MODEL_LOAD_SYNCHRONIZE=1 to re-enable.")
+                _WSL_MODEL_LOAD_SYNC_SKIP_LOGGED = True
             for x in load_completely:
                 n = x[1]
                 m = x[2]
@@ -1073,7 +1079,7 @@ class ModelPatcher:
                     key = key_param_name_to_key(n, param)
                     self.unpin_weight(key)
                     self.patch_weight_to_device(key, device_to=device_to)
-                if comfy.model_management.is_device_cuda(device_to):
+                if comfy.model_management.is_device_cuda(device_to) and not skip_wsl_load_sync:
                     torch.cuda.synchronize()
 
                 logging.debug("lowvram: loaded module regularly {} {}".format(n, m))
