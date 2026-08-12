@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 import torch
 import sys
 import os
@@ -14,8 +15,9 @@ from comfy.cli_args import args
 if not has_gpu():
     args.cpu = True
 
-from comfy import ops
-from comfy.quant_ops import QUANT_ALGOS, QuantizedTensor
+from comfy import hooks, ops
+from comfy.model_patcher import ModelPatcher
+from comfy.quant_ops import QUANT_ALGOS, QuantizedTensor, TensorCoreFP8E4M3Layout
 import comfy.utils
 
 
@@ -336,6 +338,142 @@ class TestMixedPrecisionOps(unittest.TestCase):
         self.assertEqual(saved_conf["convrot_groupsize"], 256)
         self.assertEqual(saved_conf["linear_dtype"], "int8")
         self.assertNotIn("quant_group_size", saved_conf)
+
+    def test_hook_patches_skip_only_quantized_weight_pieces(self):
+        operations = ops.mixed_precision_ops(compute_dtype=torch.float32)
+        model = torch.nn.Module()
+        model.linear = operations.Linear(4, 4, bias=False, device="cpu")
+        qdata, params = TensorCoreFP8E4M3Layout.quantize(
+            torch.ones(4, 4), scale="recalculate"
+        )
+        model.linear.quant_format = "float8_e4m3fn"
+        model.linear.layout_type = "TensorCoreFP8E4M3Layout"
+        model.linear.weight = torch.nn.Parameter(
+            QuantizedTensor(qdata, model.linear.layout_type, params),
+            requires_grad=False,
+        )
+        model.linear.input_scale = torch.nn.Parameter(
+            torch.tensor(0.125), requires_grad=False
+        )
+        model.linear_alias = model.linear
+        model.patch_target = torch.nn.Linear(4, 4, bias=False)
+        torch.nn.init.zeros_(model.patch_target.weight)
+
+        patcher = ModelPatcher(model, torch.device("cpu"), torch.device("cpu"))
+        weight = model.linear.weight
+        input_scale = model.linear.input_scale
+        hook = hooks.WeightHook()
+        hook.need_weight_init = False
+        hook.weights = {
+            "patch_target.weight": (torch.ones_like(model.patch_target.weight),)
+        }
+        hook_group = hooks.HookGroup()
+        hook_group.add(hook)
+        patcher.register_all_hook_patches(
+            hook_group, hooks.create_target_dict(hooks.EnumWeightTarget.Model)
+        )
+        patcher.patch_hooks(hook_group)
+
+        self.assertIs(model.linear.weight, weight)
+        self.assertIs(model.linear.input_scale, input_scale)
+        self.assertTrue(
+            torch.equal(
+                model.patch_target.weight,
+                torch.ones_like(model.patch_target.weight),
+            )
+        )
+
+        self.assertEqual(
+            set(patcher.get_key_patches()),
+            {
+                "linear.weight",
+                "linear.input_scale",
+                "linear_alias.weight",
+                "linear_alias.input_scale",
+                "patch_target.weight",
+            },
+        )
+
+    def test_hook_targets_disable_async_offload(self):
+        model = torch.nn.Module()
+        model.linear = ops.disable_weight_init.Linear(
+            4, 4, bias=False, device="cpu", dtype=torch.bfloat16
+        )
+        model.other = ops.disable_weight_init.Linear(
+            4, 4, bias=False, device="cpu", dtype=torch.bfloat16
+        )
+        model.linear.weight = torch.nn.Parameter(
+            model.linear.weight.float(), requires_grad=False
+        )
+        model.other.weight = torch.nn.Parameter(
+            model.other.weight.float(), requires_grad=False
+        )
+        model.linear.weight_comfy_model_dtype = torch.bfloat16
+        model.other.weight_comfy_model_dtype = torch.bfloat16
+        model.control = torch.nn.Parameter(torch.zeros(1))
+        torch.nn.init.zeros_(model.linear.weight)
+        patcher = ModelPatcher(model, torch.device("cpu"), torch.device("cpu"))
+
+        hook = hooks.WeightHook()
+        hook.need_weight_init = False
+        hook.weights = {
+            "linear.weight": (
+                torch.zeros_like(model.linear.weight),
+            )
+        }
+        group = hooks.HookGroup()
+        group.add(hook)
+        patcher.register_all_hook_patches(
+            group, hooks.create_target_dict(hooks.EnumWeightTarget.Model)
+        )
+
+        patcher.patch_hooks(group)
+        self.assertTrue(model.linear.comfy_disable_async_offload)
+        self.assertTrue(model.other.comfy_disable_async_offload)
+        self.assertTrue(model.linear.comfy_cast_weights)
+        self.assertTrue(model.other.comfy_cast_weights)
+        output = model.linear(torch.zeros(1, 4, dtype=torch.bfloat16))
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertTrue(torch.isfinite(output).all())
+        patcher.patch_hooks(None)
+
+        model.linear.comfy_disable_async_offload = False
+        model.other.comfy_disable_async_offload = False
+        patcher._hook_async_offload_disabled = False
+        patcher.patch_hooks(group)
+        self.assertTrue(model.linear.comfy_disable_async_offload)
+        self.assertTrue(model.other.comfy_disable_async_offload)
+        patcher.patch_hooks(None)
+
+    def test_cast_weight_honors_async_offload_disable(self):
+        linear = ops.disable_weight_init.Linear(
+            4, 4, bias=False, device="cpu", dtype=torch.float32
+        )
+        target = torch.device("cpu", 1)
+
+        linear.comfy_disable_async_offload = True
+        with mock.patch(
+            "comfy.model_management.get_offload_stream", return_value=None
+        ) as get_offload_stream:
+            ops.cast_bias_weight(
+                linear,
+                dtype=torch.float32,
+                device=target,
+                offloadable=True,
+            )
+        get_offload_stream.assert_not_called()
+
+        linear.comfy_disable_async_offload = False
+        with mock.patch(
+            "comfy.model_management.get_offload_stream", return_value=None
+        ) as get_offload_stream:
+            ops.cast_bias_weight(
+                linear,
+                dtype=torch.float32,
+                device=target,
+                offloadable=True,
+            )
+        get_offload_stream.assert_called_once_with(target)
 
 if __name__ == "__main__":
     unittest.main()
