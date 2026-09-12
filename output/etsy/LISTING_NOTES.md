@@ -25,25 +25,10 @@ Every shot ships as a 1200x896 preview and a 2700x2025 (4:3, Etsy-recommended) m
 
 Main listing photo: 16 (plain closed tip + hanging loop). 01 is an alternate pom-pom styling NOT in the written pattern.
 
-## Bobble Christmas Tree (NS 12) - 15 shots
+## Bobble Christmas Tree (NS 12) - 14 shots (15th WIP shot in final update)
 
 | # | File | Role | Alt text |
 |---|------|------|----------|
-| 01 | 01-hero-fir-green | Hero - Fir green | Cone with tiered bobble rows, yarn baubles, flat folded base |
-| 02 | 02-clean-white | Clean white hero | Seamless white background main-listing style |
-| 03 | 03-macro-bobble-tiers | Bobble tiers macro | Distinct tiers of 5-dc bobbles with plain rounds between; columns stay straight |
-| 04 | 04-macro-contrast-bobbles | Contrast baubles macro | Red and gold contrast bobbles closed with a green loop |
-| 05 | 05-base-fold-detail | Base fold detail | Widest tier meets the table on the flat folded BLO base |
-| 06 | 06-hands-scale | Palm-sized | About 12 cm tall, 7 cm wide |
-| 07 | 07-size-ruler | Documented size | Measuring tape: about 12 cm x 7 cm |
-| 08 | 08-colourways-lineup | Five colourways | Fir green, Sage velvet, Snow white, Crimson berry, Gold-tipped |
-| 09 | 09-set-of-three | Set of three | DK about 9 cm, worsted about 12 cm, chunky about 16 cm |
-| 10 | 10-mantel-lifestyle | Mantel styling | With pine, candle and fairy lights |
-| 11 | 11-hanging-ornament | Ornament option | Hangs by the ch-18 loop at the tip |
-| 12 | 12-materials-flatlay | Everything you need | Green worsted, contrast minis, 4 mm hook, fill, felt base disc |
-| 13 | 13-table-centrepiece | Table centrepiece | Linen, stoneware, taper candle and dried orange |
-| 14 | 14-tip-closeup | Tip close-up | Closed 3-st tip over the final pinch of stuffing |
-| 15 | 15-wip-one-piece | One piece, no sewing | Base and bobble tiers complete, working round on the hook |
 
 ## Listing copy
 Gnome title: No-Sew Christmas Gnome Crochet Pattern - One Piece Amigurumi, Beginner PDF, US+UK Terms, Gnome Ornament
