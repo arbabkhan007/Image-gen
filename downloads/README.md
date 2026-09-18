@@ -1,37 +1,34 @@
 # Crochet Pattern Images — Direct Download
 
-All 30 images (15 per pattern), 3000×3000 px, PNG format.
+All 30 images @ 3000 × 3000 px (1:1 square), PNG format, high-quality Lanczos upscale.
 
 ## Files
 
-The master zip `ALL_CROCHET_IMAGES_30images_3000x3000.zip` (~248 MB) has been split into 3 parts (each under 100 MB to fit in the repo):
+4 standalone .zip files — each opens directly with any zip tool (no merging/splitting required).
 
-- `ALL_CROCHET_IMAGES.zip.00.part` (95 MB)
-- `ALL_CROCHET_IMAGES.zip.01.part` (95 MB)
-- `ALL_CROCHET_IMAGES.zip.02.part` (58 MB)
+### Pattern 1: Crochet Mini Stocking (Advent Garland) — 15 images
+- **01_mini_stockings_images_01-08.zip** (67 MB) — images 1 through 8:
+  01_classic_red_stocking.png, 02_winter_wonderland.png, 03_rainbow_stocking.png,
+  04_rustic_cream.png, 05_scandinavian.png, 06_pastel_christmas.png,
+  07_scrappy_style.png, 08_cuff_closeup.png
+- **02_mini_stockings_images_09-15.zip** (62 MB) — images 9 through 15:
+  09_filled_with_treats.png, 10_advent_garland.png, 11_work_in_progress.png,
+  12_green_classic.png, 13_numbered_tag.png, 14_hanging_on_tree.png,
+  15_flatlay_materials.png
 
-## How to reassemble
+### Pattern 2: Year of the Goat 2027 (Fire Goat + Lamb) — 15 images
+- **03_fire_goat_lamb_images_01-08.zip** (67 MB) — images 1 through 8:
+  01_fire_goat_hero.png, 02_lamb_plushie.png, 03_pair_new_year.png,
+  04_goat_face_closeup.png, 05_horns_flower_crown.png, 06_wip_pieces.png,
+  07_goat_with_hongbao.png, 08_materials_kit.png
+- **04_fire_goat_lamb_images_09-15.zip** (57 MB) — images 9 through 15:
+  09_lamb_in_hands.png, 10_ornament_on_branch.png, 11_flame_collar_detail.png,
+  12_goat_baby_safe.png, 13_table_centerpiece.png, 14_dk_smaller_version.png,
+  15_assembly_process.png
 
-**On Mac / Linux:**
-```bash
-cat ALL_CROCHET_IMAGES.zip.00.part ALL_CROCHET_IMAGES.zip.01.part ALL_CROCHET_IMAGES.zip.02.part > ALL_CROCHET_IMAGES_30images_3000x3000.zip
-unzip ALL_CROCHET_IMAGES_30images_3000x3000.zip
-```
+## How to use
+1. Download all 4 zips (or just the pattern you want).
+2. Each zip opens directly — double-click on Mac/Windows, or run `unzip filename.zip`.
+3. Extract the PNGs anywhere you like. No reassembly needed.
 
-**On Windows (PowerShell):**
-```powershell
-cmd /c "copy /b ALL_CROCHET_IMAGES.zip.00.part+ALL_CROCHET_IMAGES.zip.01.part+ALL_CROCHET_IMAGES.zip.02.part ALL_CROCHET_IMAGES_30images_3000x3000.zip"
-```
-Or use 7-Zip: right-click the `.00.part` file → 7-Zip → "Extract here" (7-Zip auto-detects split archives).
-
-**On Windows (Command Prompt):**
-```cmd
-copy /b ALL_CROCHET_IMAGES.zip.00.part+ALL_CROCHET_IMAGES.zip.01.part+ALL_CROCHET_IMAGES.zip.02.part ALL_CROCHET_IMAGES_30images_3000x3000.zip
-```
-
-## Direct download links (raw GitHub)
-- https://raw.githubusercontent.com/arbabkhan007/Image-gen/arena/01a0af6b-image-gen/downloads/ALL_CROCHET_IMAGES.zip.00.part
-- https://raw.githubusercontent.com/arbabkhan007/Image-gen/arena/01a0af6b-image-gen/downloads/ALL_CROCHET_IMAGES.zip.01.part
-- https://raw.githubusercontent.com/arbabkhan007/Image-gen/arena/01a0af6b-image-gen/downloads/ALL_CROCHET_IMAGES.zip.02.part
-
-Then concatenate and unzip.
+Total size across all 4 zips: ~253 MB (30 PNGs at 3000×3000 px).
