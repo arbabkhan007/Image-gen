@@ -12,22 +12,25 @@ import render as R
 import typography as T
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "hiring_v2")
+OUT = os.path.join(HERE, "hiring")
 
-CREAM = (0.976, 0.961, 0.930)
-INK = (0.078, 0.145, 0.129)
-EMERALD = (0.039, 0.349, 0.278)
-EMERALD_DEEP = (0.023, 0.216, 0.176)
-MUTED = (0.365, 0.427, 0.396)
-GOLD = (0.729, 0.596, 0.380)
-FOOT_CREAM = (0.898, 0.847, 0.702)
+WHITE = (1.000, 1.000, 1.000)          # panel field
+INK = (0.078, 0.184, 0.239)            # deep navy-ink, high contrast
+TEAL = (0.000, 0.596, 0.729)           # primary brand teal
+TEAL_DEEP = (0.000, 0.463, 0.588)      # footer strip
+CORAL = (1.000, 0.420, 0.290)          # accent / numbers
+SUN = (1.000, 0.757, 0.027)            # highlight yellow
+MUTED = (0.361, 0.435, 0.478)          # secondary text
+FOOT_WHITE = (1.000, 1.000, 1.000)
 
 F7, F8, F6, F5 = ("Manrope-700.ttf", "Manrope-800.ttf",
                   "Manrope-600.ttf", "Manrope-500.ttf")
 
 ROLES = [("01", "MONTESSORI SECTION", "Female only"),
          ("02", "PRIMARY · ENGLISH", "Female only"),
-         ("03", "SUBJECT SPECIALISTS", "Physics · Urdu · Matric")]
+         ("03", "SUBJECT SPECIALISTS", None)]
+SUBJECT_CHIPS = ["PHYSICS", "URDU"]
+SCOPE = "MATRIC"
 
 KICKER = "WE'RE HIRING"
 H1, H2 = "TEACHERS", "REQUIRED"
@@ -39,7 +42,7 @@ CTA = "APPLY NOW  ·  SEND YOUR CV"
 
 # ---------------------------------------------------------------------------
 def backdrop(W, H, square, anchor_y=0.30):
-    im = Image.open(os.path.join(HERE, "plate_wide.png")).convert("RGB")
+    im = Image.open(os.path.join(HERE, "plate_bright.png")).convert("RGB")
     pw, ph = im.size
     scale = max(W / pw, H / ph)
     im = im.resize((int(pw * scale + 1), int(ph * scale + 1)), Image.LANCZOS)
@@ -48,17 +51,15 @@ def backdrop(W, H, square, anchor_y=0.30):
     oy = int((nh - H) * anchor_y)
     im = im.crop((ox, oy, ox + W, oy + H))
     a = np.asarray(im).astype(np.float32) / 255.0
-    # grade: cool emerald shadows, warm highlights
+    # bright, airy grade: lift exposure, add a touch of warmth and saturation
     lum = a @ np.array([0.299, 0.587, 0.114], np.float32)
-    sh = np.clip(1 - lum * 2.1, 0, 1)[:, :, None]
-    hi = np.clip((lum - 0.66) * 2.2, 0, 1)[:, :, None]
-    a = a * (1 - sh * 0.20) + np.array(EMERALD_DEEP, np.float32) * sh * 0.20
-    a = R.screen(a, np.array([1.0, 0.95, 0.85], np.float32) * hi * 0.12)
-    # vignette
-    xs = np.linspace(0, 1, W, dtype=np.float32)[None, :, None]
-    ys = np.linspace(0, 1, H, dtype=np.float32)[:, None, None]
-    d = np.sqrt(((xs - 0.62) ** 2) * 1.1 + ((ys - 0.36) ** 2))
-    a = a * (1 - np.clip(d - 0.40, 0, 2) ** 1.6 * 0.42)
+    a = a * 1.055 + 0.012                                  # exposure
+    a = np.clip(a, 0, 1)
+    hi = np.clip((lum - 0.72) * 2.0, 0, 1)[:, :, None]
+    a = R.screen(a, np.array([1.0, 0.97, 0.90], np.float32) * hi * 0.22)
+    # gentle saturation boost
+    g = a.mean(axis=2, keepdims=True)
+    a = np.clip(g + (a - g) * 1.14, 0, 1)
     return a
 
 
@@ -108,20 +109,20 @@ def build(W, H, square):
     photo_h = int((452 if square else 596) * s)
 
     band = backdrop(W, photo_h, square, anchor_y=0.34)
-    img = np.ones((H, W, 3), np.float32) * np.array(CREAM, np.float32)
+    img = np.ones((H, W, 3), np.float32) * np.array(WHITE, np.float32)
     img[:photo_h] = band
 
     card_x, card_y = 0, photo_h
     card_w, card_h = W, foot_top - photo_h
 
     # ---------------- cream panel ----------------
-    img[card_y:foot_top] = np.array(CREAM, np.float32)
+    img[card_y:foot_top] = np.array(WHITE, np.float32)
     # emerald keyline where the photo meets the panel
-    img[card_y:card_y + max(1, int(3.0 * s))] = np.array(EMERALD, np.float32)
+    img[card_y:card_y + max(1, int(3.0 * s))] = np.array(TEAL, np.float32)
 
     # ---------------- footer strip ----------------
-    img[foot_top:H] = np.array(EMERALD_DEEP, np.float32)
-    img[foot_top:foot_top + max(1, int(2.2 * s))] = np.array(GOLD, np.float32)
+    img[foot_top:H] = np.array(TEAL_DEEP, np.float32)
+    img[foot_top:foot_top + max(1, int(2.2 * s))] = np.array(SUN, np.float32)
 
     # ---------------- geometry ----------------
     pad = (34 if square else 40) * s
@@ -144,6 +145,11 @@ def build(W, H, square):
 
     items = []
     deco = []   # (y, x0, x1, thickness, colour) drawn after centring
+    deferred = []   # (x, y, w, h, r, rgb) rounded fills that follow the copy
+
+    def dfr(x, y, w, h, r, rgb):
+        deferred.append((x, y, w, h, r, rgb))
+        return round_rect_mask(W, H, (x, y, w, h), r)  # for preview only
 
     def add(txt, font, size, x, top=None, align="left", color=INK,
             tracking=0.0, group="panel"):
@@ -155,32 +161,42 @@ def build(W, H, square):
         items.append({"p": p, "color": color, "group": group})
         return p.get_extents()
 
-    # ---- kicker ----
-    kb = add(KICKER, F7, kick_sz, cx, top=top, color=EMERALD, tracking=7.5 * s)
+    # ---- kicker in a coral pill ----
+    kw = T.text_path(KICKER, F7, kick_sz, x=0, baseline=0,
+                     tracking=7.5 * s)[1]
+    pill_h = kick_sz * 1.86
+    pill_pad = 20 * s
+    dfr(cx, top - pill_h * 0.34, kw + pill_pad * 1.30, pill_h, pill_h / 2, CORAL)
+    kb = add(KICKER, F7, kick_sz, cx + pill_pad * 0.65,
+             top=top - pill_h * 0.34 + (pill_h - kick_sz * 0.735) / 2,
+             color=(1, 1, 1), tracking=7.5 * s)
 
-    # ---- logo badge sits on the photograph, top-right ----
-    logo_w, logo_h = (176 if square else 190) * s, (56 if square else 60) * s
-    lb_x, lb_y = M - 4 * s, M - 6 * s
-    box = round_rect_mask(W, H, (lb_x, lb_y, logo_w, logo_h), 5 * s)
-    img = img * (1 - box[:, :, None] * 0.94) + \
-        np.array((0.988, 0.978, 0.952), np.float32) * box[:, :, None] * 0.94
-    inner = round_rect_mask(W, H, (lb_x + 1.6 * s, lb_y + 1.6 * s,
-                                   logo_w - 3.2 * s, logo_h - 3.2 * s), 4 * s)
+    # ---- logo card, bottom-right of the white panel ----
+    logo_w, logo_h = (196 if square else 212) * s, (64 if square else 70) * s
+    lb_x, lb_y = W - M - 14 * s - logo_w, foot_top - logo_h - 26 * s
+    box = round_rect_mask(W, H, (lb_x, lb_y, logo_w, logo_h), 10 * s)
+    img = img * (1 - box[:, :, None] * 1.0) + \
+        np.array((0.949, 0.976, 0.984), np.float32) * box[:, :, None] * 1.0
+    inner = round_rect_mask(W, H, (lb_x + 1.8 * s, lb_y + 1.8 * s,
+                                   logo_w - 3.6 * s, logo_h - 3.6 * s), 9 * s)
     edge = np.clip(box - R.gaussian(inner, 0.7), 0, 1)
-    img = img * (1 - edge[:, :, None] * 0.55) + \
-        np.array((0.42, 0.52, 0.46), np.float32) * edge[:, :, None] * 0.55
+    img = img * (1 - edge[:, :, None] * 0.75) + \
+        np.array(TEAL, np.float32) * edge[:, :, None] * 0.75
     lab = T.text_path(LOGO_LAB, F7, 12.5 * s, x=0, baseline=0,
                       tracking=2.8 * s)[0].get_extents()
     add(LOGO_LAB, F7, 12.5 * s, lb_x + (logo_w - lab.width) / 2,
         top=lb_y + logo_h / 2 - (lab.y0 + lab.y1) / 2,
-        color=(0.40, 0.48, 0.43), tracking=2.8 * s, group="logo")
+        color=TEAL, tracking=2.8 * s, group="logo")
 
     # ---- single-line headline ----
-    hy = kb.y1 + 22 * s
+    hy = kb.y1 + 30 * s
     w1 = T.text_path(H1 + " ", F8, head_sz, x=0, baseline=0,
                      tracking=-3.0 * s)[1]
+    w2 = T.text_path(H2, F8, head_sz, x=0, baseline=0,
+                     tracking=-3.0 * s)[1]
+    dfr(cx + w1 - 6 * s, hy + adv * 0.055, w2 + 14 * s, adv * 0.90, 7 * s, SUN)
     hb = add(H1, F8, head_sz, cx, top=hy, color=INK, tracking=-3.0 * s)
-    hb2 = add(H2, F8, head_sz, cx + w1, top=hy, color=EMERALD,
+    hb2 = add(H2, F8, head_sz, cx + w1, top=hy, color=INK,
               tracking=-3.0 * s)
 
     # ---- hairline ----
@@ -191,10 +207,30 @@ def build(W, H, square):
     ry += 16 * s
     for i, (num, name, tag) in enumerate(ROLES):
         add(num, F7, (17 if square else 18.5) * s, cx, top=ry + 8 * s,
-            color=GOLD, tracking=0.8 * s)
-        add(name, F7, lab_sz, cx + 40 * s, top=ry, color=INK, tracking=0.2 * s)
-        add(tag, F5, tag_sz, W - M - 14 * s, top=ry + 7 * s,
-            color=MUTED, align="right")
+            color=CORAL, tracking=0.8 * s)
+        nb = add(name, F7, lab_sz, cx + 40 * s, top=ry, color=INK,
+                 tracking=0.2 * s)
+        if tag:
+            add(tag, F5, tag_sz, W - M - 14 * s, top=ry + 7 * s,
+                color=MUTED, align="right")
+        else:
+            # "SUBJECT SPECIALISTS" + coral chips + scope, chips hug the label
+            chip_sz = (16 if square else 17) * s
+            chip_h = chip_sz * 2.05
+            cxp = nb.x1 + 16 * s
+            for label in SUBJECT_CHIPS:
+                tw = T.text_path(label, F7, chip_sz, x=0, baseline=0,
+                                 tracking=1.8 * s)[1]
+                cw = tw + 24 * s
+                chy = ry + lab_sz * 0.735 / 2 - chip_h / 2 + 2 * s
+                dfr(cxp, chy, cw, chip_h, chip_h / 2, CORAL)
+                add(label, F7, chip_sz, cxp + 12 * s,
+                    top=chy + (chip_h - chip_sz * 0.735) / 2,
+                    color=(1, 1, 1), tracking=1.8 * s)
+                cxp += cw + 8 * s
+            add(SCOPE + " CLASSES", F7, chip_sz, cxp + 6 * s,
+                top=ry + lab_sz * 0.735 / 2 - chip_sz * 0.735 / 2 + 1 * s,
+                color=TEAL, tracking=1.6 * s)
         ry += row_h
         if i < len(ROLES) - 1:
             deco.append((ry - 15 * s, cx, cx + inner_w, 1.0 * s,
@@ -205,12 +241,21 @@ def build(W, H, square):
     nb = add("LAHORE  ·  FULL-TIME POSITIONS  ·  INTERVIEWS THIS MONTH",
              F6, (17 if square else 18.5) * s, cx, top=note_y,
              color=(0.42, 0.47, 0.44), tracking=3.0 * s)
-    deco.append((note_y - 16 * s, cx, cx + 54 * s, 1.2 * s, GOLD))
+    deco.append((note_y - 16 * s, cx, cx + 54 * s, 3.4 * s, CORAL))
 
     # ---- footer copy ----
-    add(CTA, F7, (19 if square else 21) * s, M + 14 * s,
-        top=foot_top + (26 if square else 30) * s,
-        color=FOOT_CREAM, tracking=2.4 * s, group="foot")
+    cta_sz = (17 if square else 19) * s
+    cta_w = T.text_path(CTA, F7, cta_sz, x=0, baseline=0,
+                        tracking=2.2 * s)[1]
+    btn_h = (54 if square else 58) * s
+    btn_x = M + 14 * s
+    btn_y = foot_top + (foot_h - btn_h) / 2
+    bp = round_rect_mask(W, H, (btn_x, btn_y, cta_w + 40 * s, btn_h),
+                         btn_h / 2)
+    img = img * (1 - bp[:, :, None]) + np.array(CORAL, np.float32) * bp[:, :, None]
+    add(CTA, F7, cta_sz, btn_x + 20 * s,
+        top=btn_y + btn_h / 2 - cta_sz * 0.735 / 2,
+        color=(1, 1, 1), tracking=2.2 * s, group="foot")
     add(PHONE, F8, (30 if square else 34) * s, W - M - 14 * s,
         top=foot_top + (20 if square else 24) * s,
         color=(0.988, 0.976, 0.949), align="right", group="foot")
@@ -222,9 +267,13 @@ def build(W, H, square):
     panel = [it for it in items if it.get("group") == "panel"]
     content0 = panel[0]["p"].get_extents().y0          # kicker cap top
     content1 = panel[-1]["p"].get_extents().y1         # note baseline area
-    dy = (card_y + card_h * 0.485) - (content0 + content1) / 2
+    dy = (card_y + card_h * 0.455) - (content0 + content1) / 2
     for it in panel:
         it["p"].vertices[:, 1] += dy
+
+    for (x, y, w, h, r, rgb) in deferred:
+        m = round_rect_mask(W, H, (x, y + dy, w, h), r)[:, :, None]
+        img = img * (1 - m) + np.array(rgb, np.float32) * m
 
     for (y, x0, x1, th, col) in deco:
         yy = int(y + dy)
